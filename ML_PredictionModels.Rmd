@@ -1,0 +1,186 @@
+---
+title: "Machine Learning Course Project - Prediction Models"
+author: "Juan Pablo Botero"
+date: "July 3th, 2016"
+output: html_document
+---
+# Summary  
+
+###Background
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+###Data
+
+The training data for this project are available here: *https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har. If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.
+
+###Goal
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+**The following analysis have been produced, tested and executed on Microsoft Windows 7, 64 bits and R 3.3.1 , 64 bits.**
+
+#Getting and loading the data
+
+The analysis starts by downloading the data into local files. There are 2 data sets, the training data set and the testing data set we are attempting to perform the predictions from the final model on.
+
+```{r,results='hide',message=FALSE}
+url_train <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+url_test <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+#download.file(url = url_train, destfile = 'data_train.csv')
+#download.file(url = url_test, destfile = 'data_test.csv')
+```
+
+# Exploratory Data Analysis  
+When the data is loaded into dataframes, it is necessary to locate strings containing '#DIV/0!' in otherwise numeric data, a common sentinal error code for division by zero errors. These error codes are loaded into the data frame as NA fields.   
+```{r,echo=FALSE, message=FALSE}
+library(caret)
+library(randomForest)
+library(rpart)
+library(rattle)
+library(gbm)
+```
+```{r}
+pm_train <- read.csv(file = 'data_train.csv', na.strings = c('NA','#DIV/0!',''))
+pm_quiz <- read.csv(file = 'data_test.csv',  na.strings = c('NA','#DIV/0!',''))
+str(pm_train,max.level=10)
+``` 
+Exploratory Data Analysis reveals that the first 7 fields of the data are dimensional, and may not be pertinent to the prediction model. The balance of the fields are numeric according to the data documentation available [here](http://groupware.les.inf.puc-rio.br/har). 
+
+
+#Cleaning the data
+The balance of the columns are looped through and cast into numeric data with the exception of the last column, which is the categorical class the prediction model will classify for.
+
+```{r}
+for(i in c(8:ncol(pm_train)-1)) {
+  pm_train[,i] = as.numeric(as.character(pm_train[,i]))
+  pm_quiz[,i] = as.numeric(as.character(pm_quiz[,i]))
+}
+```  
+Analysis additionally reveals that of the many variables, several are extraordinarily sparse and thus may not be as useful for building a classification model. The following code initiates a slicer index of column names, removes the columns with null values, and also removes the inital seven columns of dimensional data. Rather than modify the actual data, this vector of column names will be used as a slicer index into the training data, cross-validation data, and the testing data when interacting with a model.
+
+```{r}
+nznames <- colnames(pm_train)
+nznames <- colnames(pm_train[colSums(is.na(pm_train)) == 0])
+nznames <- nznames[-c(1:7)]
+sort(nznames)
+```  
+
+###Data Partitioning
+To find an optimal model, with the best performance both in Accuracy as well as minimizing Out of Sample Error, the full testing data is split randomly with a set seed with 70% of the data into the training sample and 30% of the data used as cross-validation. When the samples are created, they are sliced by column against the feature set so only the variables of interest are fed into the final model.
+
+```{r}
+set.seed(947284)
+index_train <- createDataPartition(y=pm_train$classe, p=0.70, list=FALSE)
+data_train <- pm_train[index_train,nznames]
+data_validation <- pm_train[-index_train,nznames]
+dim(data_train); dim(data_validation)
+```
+
+#Prection Models Building  
+For this project I'll use 3 differnt model algorithms and then look to see whih provides the best out-of-sample accuracty. The three model types I'm going to test are:
+
+1. **Decision trees with CART (rpart)**
+2. **Stochastic gradient boosting trees (gbm)**
+3. **Random forest decision trees (rf)**
+
+*The code for each model fit*:
+
+```{r, results='hide'}
+fitControl <- trainControl(method='cv', number = 4)
+```
+
+```{r, results='hide', message=FALSE}
+model_cart <- train(
+  classe ~ ., 
+  data=data_train,
+  trControl=fitControl,
+  method='rpart'
+)
+save(model_cart, file='./ModelFitCART.RData')
+
+model_gbm <- train(
+  classe ~ ., 
+  data=data_train,
+  trControl=fitControl,
+  method='gbm'
+)
+save(model_gbm, file='./ModelFitGBM.RData')
+
+model_rf <- train(
+  classe ~ ., 
+  data=data_train,
+  trControl=fitControl,
+  method='rf',
+  ntree=100
+)
+save(model_rf, file='./ModelFitRF.RData')
+
+```  
+###Model Assessment
+```{r, message=FALSE}
+predCART <- predict(model_cart, newdata=data_validation)
+cmCART <- confusionMatrix(predCART, data_validation$classe)
+predGBM <- predict(model_gbm, newdata=data_validation)
+cmGBM <- confusionMatrix(predGBM, data_validation$classe)
+predRF <- predict(model_rf, newdata=data_validation)
+cmRF <- confusionMatrix(predRF, data_validation$classe)
+AccuracyResults <- data.frame(
+  Model = c('CART', 'GBM', 'RF'),
+  Accuracy = rbind(cmCART$overall[1], cmGBM$overall[1], cmRF$overall[1])
+)
+print(AccuracyResults)
+```  
+Based on an assessment of these 3 model fits and out-of-sample results, it looks like both gradient boosting and random forests outperform the CART model, with random forests being slightly more accurate. The confusion matrix for the random forest model is below.
+```{r, echo=FALSE,message=FALSE}
+ cmRF$table
+```  
+The next step in modeling could be to create an ensemble model of these three model results, however, given the high accuracy of the random forest model, I don't believe this process is necessary here. I'll accept the random forest model as the champion and move on to prediction in the validation sample.
+
+#Prediction Test Data
+Random Forests gave an Accuracy in the data_validation dataset of 99.18%, which was more accurate that what I got from the Decision Trees or GBM. The expected out-of-sample error is 100-99.18 = 0.82%. sample.
+
+As a last step in the project, I'll use the validation data sample ('pml-testing.csv') to predict a classe for each of the 20 observations based on the other information we know about these observations contained in the validation. 
+```{r, message=FALSE}
+predValidation <- predict(model_rf, newdata=pm_quiz)
+ValidationPredictionResults <- data.frame(
+  problem_id=pm_quiz$X,
+  predicted=predValidation
+)
+print(ValidationPredictionResults)
+```  
+
+#Conclusions  
+Based on the data available, I am able to fit a reasonably sound model with a high degree of accuracy in predicting out of sample observations. One assumption that I used in this work that could be relaxed in future work would be to remove the section of data preparation where I limit features to those that are non-zero in the validation sample. For example, when fitting a model on all training data columns, some features that are all missing in the validation sample do included non-zero items in the training sample and are used in the decision tree models.
+
+Despite these remaining questions on missing data in the samples, the random forest model with cross-validation produces a surprisingly accurate model that is sufficient for predictive analytics.
+
+#Appendix: Figures  
+
+
+```{r, echo=FALSE}
+fancyRpartPlot(model_cart$finalModel)
+```  
+
+```{r, echo=FALSE}
+plot(cmCART$table, col = cmCART$byClass, main = paste("Decision Tree Confusion Matrix: Accuracy =", round(cmCART$overall['Accuracy'], 4)))
+```  
+
+
+```{r, echo =FALSE}
+plot(model_gbm)
+```  
+
+``` 
+```{r, echo=FALSE}
+plot(cmRF$table, col = cmRF$byClass, main = paste("Random Forest Confusion Matrix: Accuracy =", round(cmRF$overall['Accuracy'], 4)))
+``` 
+
+
+```{r, echo=FALSE}
+plot(model_rf$finalModel, main="Final Model (RF) Error vs Trees")
+```  
